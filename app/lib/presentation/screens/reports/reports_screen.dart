@@ -27,6 +27,13 @@ class _ReportsScreenState extends State<ReportsScreen> {
   late List<String> _dateOptions;
   late List<String> _typeOptions;
 
+  // Cache for filtered transactions
+  List<MoneyTransaction>? _cachedFilteredTransactions;
+  int _lastTransactionCount = -1;
+  String? _lastDateFilter;
+  String? _lastTypeFilter;
+  DateTime? _lastSelectedDate;
+
   @override
   void didChangeDependencies() {
     super.didChangeDependencies();
@@ -165,7 +172,21 @@ class _ReportsScreenState extends State<ReportsScreen> {
     final theme = Theme.of(context);
     final isDark = theme.brightness == Brightness.dark;
     final l10n = AppLocalizations.of(context)!;
-    final filteredTransactions = _getFilteredTransactions(transactionProvider.allTransactions, l10n);
+    
+    // Cache filtered transactions - only recalculate if filters or data changed
+    final allTransactions = transactionProvider.allTransactions;
+    if (_lastTransactionCount != allTransactions.length ||
+        _lastDateFilter != _dateFilter ||
+        _lastTypeFilter != _typeFilter ||
+        _lastSelectedDate != _selectedDate) {
+      _cachedFilteredTransactions = _getFilteredTransactions(allTransactions, l10n);
+      _lastTransactionCount = allTransactions.length;
+      _lastDateFilter = _dateFilter;
+      _lastTypeFilter = _typeFilter;
+      _lastSelectedDate = _selectedDate;
+    }
+    
+    final filteredTransactions = _cachedFilteredTransactions ?? [];
     
     // Calculate summary
     double totalAmount = filteredTransactions.fold(0, (sum, t) => sum + t.amount);

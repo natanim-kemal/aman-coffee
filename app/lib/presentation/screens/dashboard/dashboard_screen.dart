@@ -26,6 +26,15 @@ class DashboardScreen extends StatefulWidget {
 }
 
 class _DashboardScreenState extends State<DashboardScreen> {
+  // Cache for expensive computations
+  List<double>? _cachedDistributedData;
+  List<double>? _cachedReturnedData;
+  List<String>? _cachedLabels;
+  List<dynamic>? _cachedActiveWorkers;
+  int _lastTransactionCount = -1;
+  int _lastWorkerCount = -1;
+  int _lastLabelDay = -1; // Track current day for label caching
+
   @override
   void initState() {
     super.initState();
@@ -39,7 +48,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
   @override
   Widget build(BuildContext context) {
 
-    final authProvider = Provider.of<AuthProvider>(context);
+    final authProvider = Provider.of<AuthProvider>(context, listen: false);
     final workerProvider = Provider.of<WorkerProvider>(context);
     final transactionProvider = Provider.of<TransactionProvider>(context);
     final theme = Theme.of(context);
@@ -48,9 +57,31 @@ class _DashboardScreenState extends State<DashboardScreen> {
     // Robust Localization: Allow null, use fallbacks
     final AppLocalizations? localizations = AppLocalizations.of(context);
 
-    final distributedData = _getLast7DaysData('distribution');
-    final returnedData = _getLast7DaysData('return');
-    final labels = _getLast7DaysLabels();
+    // Cache expensive computations - only recalculate if data changed
+    if (_lastTransactionCount != transactionProvider.allTransactions.length) {
+      _cachedDistributedData = _getLast7DaysData('distribution', transactionProvider.allTransactions);
+      _cachedReturnedData = _getLast7DaysData('return', transactionProvider.allTransactions);
+      _lastTransactionCount = transactionProvider.allTransactions.length;
+    }
+
+    // Cache labels separately - only recalculate when day changes
+    final currentDay = DateTime.now().day;
+    if (_lastLabelDay != currentDay) {
+      _cachedLabels = _getLast7DaysLabels();
+      _lastLabelDay = currentDay;
+    }
+
+    if (_lastWorkerCount != workerProvider.workers.length) {
+      _cachedActiveWorkers = workerProvider.workers
+          .where((w) => w.status == 'active')
+          .take(3)
+          .toList();
+      _lastWorkerCount = workerProvider.workers.length;
+    }
+
+    final distributedData = _cachedDistributedData ?? [];
+    final returnedData = _cachedReturnedData ?? [];
+    final labels = _cachedLabels ?? [];
 
     return Scaffold(
       backgroundColor: Colors.transparent,
@@ -326,9 +357,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
                         ],
                       ),
                       const SizedBox(height: 12),
-                      ...workerProvider.workers
-                          .where((w) => w.status == 'active')
-                          .take(3)
+                      ...(_cachedActiveWorkers ?? [])
                           .map((worker) {
                             final isLowBalance = worker.currentBalance < 500;
                             final balanceColor = isLowBalance ? Colors.red : Colors.green;
@@ -476,26 +505,34 @@ class _DashboardScreenState extends State<DashboardScreen> {
     );
   }
 
-  List<double> _getLast7DaysData(String type) {
-    final transactionProvider = Provider.of<TransactionProvider>(context, listen: false);
-    final transactions = transactionProvider.allTransactions;
+  List<double> _getLast7DaysData(String type, List<dynamic> transactions) {
     final now = DateTime.now();
-    List<double> data = [];
+    // Initialize 7 days of data
+    List<double> data = List.filled(7, 0.0);
     
-    for (int i = 6; i >= 0; i--) {
-      final day = now.subtract(Duration(days: i));
-      final startOfDay = DateTime(day.year, day.month, day.day);
-      final endOfDay = DateTime(day.year, day.month, day.day, 23, 59, 59);
+    // Single pass through all transactions
+    for (var t in transactions) {
+      if (t.type != type) continue;
       
-      double dailySum = transactions
-          .where((t) =>
-              t.type == type &&
-              t.createdAt.isAfter(startOfDay) &&
-              t.createdAt.isBefore(endOfDay))
-          .fold(0.0, (sum, t) => sum + t.amount);
+      final transactionDate = t.createdAt;
+      final daysDifference = now.difference(transactionDate).inDays;
       
-      data.add(dailySum);
+      // Check if transaction is within the last 7 days
+      if (daysDifference >= 0 && daysDifference < 7) {
+        // Calculate index (6 = today, 0 = 6 days ago)
+        final index = 6 - daysDifference;
+        
+        // Verify it's the same calendar day using normalized date comparison
+        final normalizedNow = DateTime(now.year, now.month, now.day);
+        final normalizedTransaction = DateTime(transactionDate.year, transactionDate.month, transactionDate.day);
+        final normalizedTarget = normalizedNow.subtract(Duration(days: daysDifference));
+        
+        if (normalizedTransaction.isAtSameMomentAs(normalizedTarget)) {
+          data[index] += t.amount;
+        }
+      }
     }
+    
     return data;
   }
 
