@@ -48,8 +48,10 @@ class _DashboardScreenState extends State<DashboardScreen> {
     // Robust Localization: Allow null, use fallbacks
     final AppLocalizations? localizations = AppLocalizations.of(context);
 
-    final distributedData = _getLast7DaysData('distribution');
-    final returnedData = _getLast7DaysData('return');
+    // Use cached chart data from provider instead of calculating in build
+    final chartData = transactionProvider.getLast7DaysChartData();
+    final distributedData = chartData['distribution'] ?? [];
+    final returnedData = chartData['return'] ?? [];
     final labels = _getLast7DaysLabels();
 
     return Scaffold(
@@ -474,29 +476,6 @@ class _DashboardScreenState extends State<DashboardScreen> {
         ),
       ),
     );
-  }
-
-  List<double> _getLast7DaysData(String type) {
-    final transactionProvider = Provider.of<TransactionProvider>(context, listen: false);
-    final transactions = transactionProvider.allTransactions;
-    final now = DateTime.now();
-    List<double> data = [];
-    
-    for (int i = 6; i >= 0; i--) {
-      final day = now.subtract(Duration(days: i));
-      final startOfDay = DateTime(day.year, day.month, day.day);
-      final endOfDay = DateTime(day.year, day.month, day.day, 23, 59, 59);
-      
-      double dailySum = transactions
-          .where((t) =>
-              t.type == type &&
-              t.createdAt.isAfter(startOfDay) &&
-              t.createdAt.isBefore(endOfDay))
-          .fold(0.0, (sum, t) => sum + t.amount);
-      
-      data.add(dailySum);
-    }
-    return data;
   }
 
   List<String> _getLast7DaysLabels() {

@@ -87,18 +87,33 @@ class WorkerProvider with ChangeNotifier {
     }).toList();
   }
 
-  /// Update statistics
+  /// Update statistics - optimized to use single pass
   void _updateStatistics() {
     _totalWorkers = _workers.length;
-    _activeToday = _workers.where((w) => w.status == 'active').length;
-    _totalRevenue = _workers.fold<double>(
-      0.0,
-      (sum, worker) => sum + worker.totalCoffeePurchased,
-    );
-    _avgPerformance = _workers.isNotEmpty
-        ? _workers.fold<double>(0.0, (sum, worker) => sum + worker.performanceRating) /
-            _workers.length
-        : 0.0;
+    
+    if (_workers.isEmpty) {
+      _activeToday = 0;
+      _totalRevenue = 0.0;
+      _avgPerformance = 0.0;
+      return;
+    }
+    
+    // Single pass through workers list for better performance
+    int activeCount = 0;
+    double totalRevenue = 0.0;
+    double totalPerformance = 0.0;
+    
+    for (final worker in _workers) {
+      if (worker.status == 'active') {
+        activeCount++;
+      }
+      totalRevenue += worker.totalCoffeePurchased;
+      totalPerformance += worker.performanceRating;
+    }
+    
+    _activeToday = activeCount;
+    _totalRevenue = totalRevenue;
+    _avgPerformance = totalPerformance / _workers.length;
   }
 
   /// Set search query

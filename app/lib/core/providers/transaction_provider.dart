@@ -15,6 +15,10 @@ class TransactionProvider with ChangeNotifier {
   double _todayReturned = 0.0;
   double _todayPurchased = 0.0;
 
+  // Cached chart data for dashboard
+  Map<String, List<double>>? _last7DaysCache;
+  DateTime? _cacheTimestamp;
+
   List<MoneyTransaction> get allTransactions => _allTransactions;
   List<MoneyTransaction> get workerTransactions => _workerTransactions;
   bool get isLoading => _isLoading;
@@ -24,6 +28,66 @@ class TransactionProvider with ChangeNotifier {
   double get todayReturned => _todayReturned;
   double get todayPurchased => _todayPurchased;
   double get todayNet => _todayDistributed - _todayReturned - _todayPurchased;
+
+  /// Get cached chart data for last 7 days
+  Map<String, List<double>> getLast7DaysChartData() {
+    // Return cached data if it's less than 5 minutes old
+    if (_last7DaysCache != null && 
+        _cacheTimestamp != null && 
+        DateTime.now().difference(_cacheTimestamp!) < const Duration(minutes: 5)) {
+      return _last7DaysCache!;
+    }
+    
+    // Recalculate and cache
+    _last7DaysCache = _calculateLast7DaysData();
+    _cacheTimestamp = DateTime.now();
+    return _last7DaysCache!;
+  }
+
+  /// Calculate chart data for last 7 days (optimized with O(1) lookups)
+  Map<String, List<double>> _calculateLast7DaysData() {
+    final now = DateTime.now();
+    final distributionData = List<double>.filled(7, 0.0);
+    final returnData = List<double>.filled(7, 0.0);
+    
+    // Pre-calculate day boundaries and create a map for O(1) lookups
+    final dayToIndexMap = <DateTime, int>{};
+    for (int i = 0; i < 7; i++) {
+      final day = now.subtract(Duration(days: 6 - i));
+      final dayBoundary = DateTime(day.year, day.month, day.day);
+      dayToIndexMap[dayBoundary] = i;
+    }
+    
+    // Single pass through transactions with O(1) day lookup
+    for (final transaction in _allTransactions) {
+      final transactionDay = DateTime(
+        transaction.createdAt.year,
+        transaction.createdAt.month,
+        transaction.createdAt.day,
+      );
+      
+      // O(1) lookup to find the day index
+      final index = dayToIndexMap[transactionDay];
+      if (index != null) {
+        if (transaction.type == 'distribution') {
+          distributionData[index] += transaction.amount;
+        } else if (transaction.type == 'return') {
+          returnData[index] += transaction.amount;
+        }
+      }
+    }
+    
+    return {
+      'distribution': distributionData,
+      'return': returnData,
+    };
+  }
+
+  /// Invalidate cache when transactions change
+  void _invalidateCache() {
+    _last7DaysCache = null;
+    _cacheTimestamp = null;
+  }
 
   /// Load worker transactions
   void loadWorkerTransactions(String workerId) {
@@ -45,6 +109,7 @@ class TransactionProvider with ChangeNotifier {
     _transactionService.getAllTransactionsStream().listen(
       (transactions) {
         _allTransactions = transactions;
+        _invalidateCache(); // Invalidate cache when transactions change
         notifyListeners();
       },
       onError: (error) {

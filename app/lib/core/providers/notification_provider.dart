@@ -16,6 +16,10 @@ class NotificationProvider with ChangeNotifier {
   int get unreadCount => _unreadCount;
 
   /// Initialize listener for a specific user
+  /// 
+  /// Note: Requires a composite Firestore index on (targetUserId, createdAt)
+  /// for optimal performance. Firestore will provide a link to create this
+  /// index on first query if it doesn't exist.
   void init(String userId) {
     if (_currentUserId == userId) return; 
     
@@ -25,6 +29,7 @@ class NotificationProvider with ChangeNotifier {
     _subscription = _firestore
         .collection('notifications')
         .where('targetUserId', isEqualTo: userId)
+        .orderBy('createdAt', descending: true) // Sort by createdAt for stable ordering
         .limit(10) // Limit to last 10 notifications
         .snapshots()
         .listen((snapshot) {
@@ -32,8 +37,7 @@ class NotificationProvider with ChangeNotifier {
           .map((doc) => AppNotification.fromFirestore(doc.data(), doc.id))
           .toList();
       
-      // Sort in memory instead
-      _notifications.sort((a, b) => b.createdAt.compareTo(a.createdAt));
+      // No need to sort in memory since we're ordering in the query
       
       _unreadCount = _notifications.where((n) => !n.isRead).length;
       notifyListeners();
